@@ -10,36 +10,34 @@
  *******************************************************************************/
 package org.eclipse.pde.internal.ui.preferences;
 
-import org.eclipse.pde.core.target.TargetBundle;
-import org.eclipse.pde.core.target.ITargetDefinition;
-
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import org.eclipse.core.resources.WorkspaceJob;
 import org.eclipse.core.runtime.*;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.pde.core.plugin.IPluginModelBase;
 import org.eclipse.pde.core.plugin.PluginRegistry;
+import org.eclipse.pde.core.target.ITargetDefinition;
+import org.eclipse.pde.core.target.TargetBundle;
 import org.eclipse.pde.internal.core.PDECore;
 import org.eclipse.pde.internal.core.SearchablePluginsManager;
 import org.eclipse.pde.internal.ui.PDEUIMessages;
 
 /**
  * Adds/Removes the target bundles to/from Java search
- * 
+ *
  * @since 3.6
  */
 public class AddToJavaSearchJob extends WorkspaceJob {
 
 	private static final String JOB_FAMILY_ID = "AddToJavaSearchJob"; //$NON-NLS-1$
 
-	private IPluginModelBase[] fBundles;
+	private List<IPluginModelBase> fBundles = new ArrayList<IPluginModelBase>();
 	private boolean fAdd;
-	private ITargetDefinition fTargetDefinition;
+	private List<ITargetDefinition> fTargetDefinitions = new ArrayList<ITargetDefinition>();
 
 	/**
 	 * Adds/Removes the target bundles to/from Java search
-	 * 
+	 *
 	 * @param target	The target definition whose bundles are to be added/removed.
 	 */
 	public static void synchWithTarget(ITargetDefinition target) {
@@ -59,7 +57,7 @@ public class AddToJavaSearchJob extends WorkspaceJob {
 
 	/**
 	 * Adds or removes a set of bundles from Java search
-	 * 
+	 *
 	 * @param bundles	bundles that are to be added/removed.
 	 * @param add		<code>true</code> to add, <code>false></code> to remove
 	 */
@@ -72,12 +70,26 @@ public class AddToJavaSearchJob extends WorkspaceJob {
 	/**
 	 * Updates the contents of the java search scope setting its contents to the
 	 * contents of the given target definition.
-	 * 
+	 *
 	 * @param target target to update search scope with
 	 */
 	private AddToJavaSearchJob(ITargetDefinition target) {
 		super(PDEUIMessages.AddToJavaSearchJob_0);
-		fTargetDefinition = target;
+		fTargetDefinitions.add(target);
+		fAdd = true;
+		fBundles = null;
+	}
+
+	/**
+	 * Updates the contents of the java search scope setting its contents to the
+	 * contents of the given target definitions.
+	 *
+	 * @param target target to update search scope with
+	 * @since 3.8
+	 */
+	private AddToJavaSearchJob(List<ITargetDefinition> targets) {
+		super(PDEUIMessages.AddToJavaSearchJob_0);
+		fTargetDefinitions = targets;
 		fAdd = true;
 		fBundles = null;
 	}
@@ -87,14 +99,13 @@ public class AddToJavaSearchJob extends WorkspaceJob {
 	 * Adds them to the scope if add to <code>true</code> otherwise they are removed.
 	 * Calling this method with bundles being null and add being <code>false</code>
 	 * will clear the java search scope.
-	 * 
+	 *
 	 * @param bundles set of bundles to add or remove
 	 * @param add whether to add or remove the bundles
 	 */
 	private AddToJavaSearchJob(IPluginModelBase[] bundles, boolean add) {
 		super(PDEUIMessages.AddToJavaSearchJob_0);
-		fTargetDefinition = null;
-		fBundles = bundles;
+		fBundles = Arrays.asList(bundles);
 		fAdd = add;
 	}
 
@@ -102,7 +113,7 @@ public class AddToJavaSearchJob extends WorkspaceJob {
 	 * @see org.eclipse.core.resources.WorkspaceJob#runInWorkspace(org.eclipse.core.runtime.IProgressMonitor)
 	 */
 	public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException {
-		int ticks = fTargetDefinition != null ? 100 : 25;
+		int ticks = fTargetDefinitions.isEmpty() ? 25 : 100;
 		SubMonitor subMon = SubMonitor.convert(monitor, ticks);
 		try {
 			if (subMon.isCanceled()) {
@@ -112,54 +123,51 @@ public class AddToJavaSearchJob extends WorkspaceJob {
 			SearchablePluginsManager manager = PDECore.getDefault().getSearchablePluginsManager();
 
 			// If synching with a target, clear the project and check that the target is resolved
-			if (fTargetDefinition != null) {
-
+			if (!fTargetDefinitions.isEmpty()) {
 				manager.removeAllFromJavaSearch();
-
-				if (!fTargetDefinition.isResolved()) {
-					IStatus status = fTargetDefinition.resolve(subMon.newChild(50));
-					if (!status.isOK()) {
-						return status;
+				for (ITargetDefinition target : fTargetDefinitions) {
+					if (!target.isResolved()) {
+						IStatus status = target.resolve(subMon.newChild(50));
+						if (!status.isOK()) {
+							return status;
+						}
+						subMon.subTask(""); //$NON-NLS-1$
+					} else {
+						subMon.worked(50);
 					}
-					subMon.subTask(""); //$NON-NLS-1$
-				} else {
-					subMon.worked(50);
-				}
 
-				if (monitor.isCanceled()) {
-					return Status.CANCEL_STATUS;
-				}
-
-				TargetBundle[] bundles = fTargetDefinition.getBundles();
-				fAdd = true;
-				List<IPluginModelBase> models = new ArrayList<IPluginModelBase>(bundles.length);
-				for (int index = 0; index < bundles.length; index++) {
-					IPluginModelBase model = PluginRegistry.findModel(bundles[index].getBundleInfo().getSymbolicName());
-					if (model != null) {
-						models.add(model);
+					if (monitor.isCanceled()) {
+						return Status.CANCEL_STATUS;
 					}
+
+					TargetBundle[] bundles = target.getBundles();
+					fAdd = true;
+					List<IPluginModelBase> models = new ArrayList<IPluginModelBase>(bundles.length);
+					for (int index = 0; index < bundles.length; index++) {
+						IPluginModelBase model = PluginRegistry.findModel(bundles[index].getBundleInfo().getSymbolicName());
+						if (model != null) {
+							models.add(model);
+						}
+					}
+					subMon.worked(25);
+					fBundles.addAll(models);
 				}
-				subMon.worked(25);
-				fBundles = models.toArray(new IPluginModelBase[models.size()]);
 			}
 
 			if (subMon.isCanceled()) {
 				return Status.CANCEL_STATUS;
 			}
-
 			if (fAdd) {
-				manager.addToJavaSearch(fBundles);
+				manager.addToJavaSearch(fBundles.toArray(new IPluginModelBase[fBundles.size()]));
 			} else {
 				if (fBundles != null) {
-					manager.removeFromJavaSearch(fBundles);
+					manager.removeFromJavaSearch(fBundles.toArray(new IPluginModelBase[fBundles.size()]));
 				} else {
 					manager.removeAllFromJavaSearch();
 				}
 			}
 			subMon.worked(25);
-
 			return Status.OK_STATUS;
-
 		} finally {
 			monitor.done();
 		}
@@ -170,6 +178,16 @@ public class AddToJavaSearchJob extends WorkspaceJob {
 	 */
 	public boolean belongsTo(Object family) {
 		return JOB_FAMILY_ID.equals(family);
+	}
+
+	/**
+	 * Set several target definitions as resolution context
+	 * @param targetDefintions
+	 * @since 3.8
+	 */
+	public static void synchWithTargets(List<ITargetDefinition> targetDefintions) {
+		Job.getJobManager().cancel(JOB_FAMILY_ID);
+		AddToJavaSearchJob job = new AddToJavaSearchJob(targetDefintions);
 	}
 
 }

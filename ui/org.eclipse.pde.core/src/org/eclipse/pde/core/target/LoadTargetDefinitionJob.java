@@ -31,7 +31,7 @@ import org.eclipse.pde.internal.core.target.*;
 
 /**
  * Sets the current target platform based on a target definition.
- * 
+ *
  * @since 3.8
  */
 public class LoadTargetDefinitionJob extends WorkspaceJob {
@@ -39,9 +39,9 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 	private static final String JOB_FAMILY_ID = "LoadTargetDefinitionJob"; //$NON-NLS-1$
 
 	/**
-	 * Target definition being loaded
+	 * Target definitions being loaded
 	 */
-	private ITargetDefinition fTarget;
+	private List<ITargetDefinition> fTargets;
 
 	/**
 	 * Whether a target definition was specified
@@ -54,7 +54,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 	 * the target platform is empty and all other settings are default.  This
 	 * method will cancel all existing LoadTargetDefinitionJob instances then
 	 * schedules the operation as a user job.
-	 * 
+	 *
 	 * @param target target definition or <code>null</code> if none
 	 */
 	public static void load(ITargetDefinition target) {
@@ -68,13 +68,34 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 	 * method will cancel all existing LoadTargetDefinitionJob instances then
 	 * schedules the operation as a user job.  Adds the given listener to the
 	 * job that is started.
-	 * 
+	 *
 	 * @param target target definition or <code>null</code> if none
 	 * @param listener job change listener that will be added to the created job
 	 */
 	public static void load(ITargetDefinition target, IJobChangeListener listener) {
 		Job.getJobManager().cancel(JOB_FAMILY_ID);
 		Job job = new LoadTargetDefinitionJob(target);
+		job.setUser(true);
+		if (listener != null) {
+			job.addJobChangeListener(listener);
+		}
+		job.schedule();
+	}
+
+	/**
+	 * Constructs a new operation to load the specified target definitions
+	 * as the current target platform. When <code>null</code> is specified
+	 * the target platform is empty and all other settings are default.  This
+	 * method will cancel all existing LoadTargetDefinitionJob instances then
+	 * schedules the operation as a user job.  Adds the given listener to the
+	 * job that is started.
+	 * @param toLoad
+	 * @param listener
+	 * @since 3.9
+	 */
+	public static void load(List<ITargetDefinition> targets, IJobChangeListener listener) {
+		Job.getJobManager().cancel(JOB_FAMILY_ID);
+		Job job = new LoadTargetDefinitionJob(targets);
 		job.setUser(true);
 		if (listener != null) {
 			job.addJobChangeListener(listener);
@@ -94,11 +115,34 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 	 */
 	public LoadTargetDefinitionJob(ITargetDefinition target) {
 		super(Messages.LoadTargetDefinitionJob_0);
-		fTarget = target;
+		fTargets = new ArrayList<ITargetDefinition>();
 		if (target == null) {
 			fNone = true;
 			ITargetPlatformService service = (ITargetPlatformService) PDECore.getDefault().acquireService(ITargetPlatformService.class.getName());
-			fTarget = service.newTarget();
+			fTargets.add(service.newTarget());
+		} else {
+			fTargets.add(target);
+		}
+	}
+
+	/**
+	 * Constructs a new operation to load the specified target definitions
+	 * as the current target platform. When <code>null</code> is specified
+	 * the target platform is empty and all other settings are default.
+	 *<p>
+	 * Clients should use {@link #load(ITargetDefinition, IJobChangeListener)} instead to ensure
+	 * any existing jobs are cancelled.
+	 * </p>
+	 * @param target target definitions
+	 */
+	public LoadTargetDefinitionJob(List<ITargetDefinition> targets) {
+		super(Messages.LoadTargetDefinitionJob_0);
+		fTargets = targets;
+		if (targets == null || targets.isEmpty()) {
+			fNone = true;
+			ITargetPlatformService service = (ITargetPlatformService) PDECore.getDefault().acquireService(ITargetPlatformService.class.getName());
+			fTargets = new ArrayList<ITargetDefinition>();
+			fTargets.add(service.newTarget());
 		}
 	}
 
@@ -163,7 +207,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 	/**
 	 * Configures program and VM argument preferences based on the target
 	 * definition.
-	 * 
+	 *
 	 * @param pref preference manager
 	 * @param monitor progress monitor
 	 */
@@ -179,7 +223,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 
 	/**
 	 * Configures the environment preferences from the target definition.
-	 * 
+	 *
 	 * @param pref preference manager
 	 * @param monitor progress monitor
 	 */
@@ -195,7 +239,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 	/**
 	 * Sets the given preference to default when <code>null</code> or the
 	 * specified value.
-	 * 
+	 *
 	 * @param pref preference manager
 	 * @param key preference key
 	 * @param value preference value or <code>null</code>
@@ -234,7 +278,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 
 	/**
 	 * Sets implicit dependencies, if any
-	 * 
+	 *
 	 * @param pref preference store
 	 * @param monitor progress monitor
 	 */
@@ -257,7 +301,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 	/**
 	 * Resolves the bundles in the target platform and sets them in the corresponding
 	 * CHECKED_PLUGINS preference. Sets home and addition location preferences as well.
-	 * 
+	 *
 	 * @param pref
 	 * @param monitor
 	 * @throws CoreException
@@ -312,7 +356,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 	}
 
 	/**
-	 * Sets the TARGET_PROFILE preference which stores the ID of the target profile used 
+	 * Sets the TARGET_PROFILE preference which stores the ID of the target profile used
 	 * (if based on an target extension) or the workspace location of the file that
 	 * was used. For now we just clear it.
 	 * <p>
@@ -337,7 +381,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 
 	/**
 	 * Returns a list of additional locations of bundles.
-	 * 
+	 *
 	 * @return additional bundle locations
 	 */
 	private List<String> getAdditionalLocs() throws CoreException {
@@ -606,7 +650,7 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 
 	/**
 	 * Iterates through the given set of models and removes models from the state that are not enabled (unchecked on the content tab)
-	 * 
+	 *
 	 * @param state state to remove models from
 	 * @param models list of models to look for disabled models
 	 */
@@ -622,4 +666,5 @@ public class LoadTargetDefinitionJob extends WorkspaceJob {
 			state.resolveState(true);
 		}
 	}
+
 }

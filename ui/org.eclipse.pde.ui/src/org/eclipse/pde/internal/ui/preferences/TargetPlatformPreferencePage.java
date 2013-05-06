@@ -89,7 +89,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 			final Object element = cell.getElement();
 			Styler style = new Styler() {
 				public void applyStyles(TextStyle textStyle) {
-					if (element.equals(fActiveTarget)) {
+					if (fActiveTargets.contains(element)) {
 						textStyle.font = getBoldFont();
 					}
 				}
@@ -102,7 +102,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 				name = targetHandle.toString();
 			}
 
-			if (targetDef.equals(fActiveTarget)) {
+			if (fActiveTargets.contains(targetDef)) {
 				name = name + PDEUIMessages.TargetPlatformPreferencePage2_1;
 			}
 
@@ -132,7 +132,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 
 		private Image getImage(ITargetDefinition target) {
 			int flag = 0;
-			if (target.equals(fActiveTarget) && target.isResolved()) {
+			if (fActiveTargets.contains(target) && target.isResolved()) {
 				if (target.getStatus().getSeverity() == IStatus.WARNING) {
 					flag = SharedLabelProvider.F_WARNING;
 				} else if (target.getStatus().getSeverity() == IStatus.ERROR) {
@@ -183,7 +183,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 	private List<ITargetDefinition> fTargets = new ArrayList<ITargetDefinition>();
 
 	/**
-	 * Removed definitions (to be removed on apply) 
+	 * Removed definitions (to be removed on apply)
 	 */
 	private List<ITargetDefinition> fRemoved = new ArrayList<ITargetDefinition>();
 
@@ -193,14 +193,14 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 	private Map<Object, Object> fMoved = new HashMap<Object, Object>(1);
 
 	/**
-	 * The chosen active target (will be loaded on apply)
+	 * The chosen active targets (will be loaded on apply)
 	 */
-	private ITargetDefinition fActiveTarget;
+	private List<ITargetDefinition> fActiveTargets = new ArrayList<ITargetDefinition>();
 
 	/**
-	 * Previously active target handle or null
+	 * Previously active target handles
 	 */
-	private ITargetHandle fPrevious;
+	private List<ITargetHandle> fPrevious = new ArrayList<ITargetHandle>();
 
 	/**
 	 * Stores whether the current target platform is out of synch with the file system and must be reloaded
@@ -240,13 +240,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 		fTableViewer.setContentProvider(ArrayContentProvider.getInstance());
 		fTableViewer.addCheckStateListener(new ICheckStateListener() {
 			public void checkStateChanged(CheckStateChangedEvent event) {
-				if (event.getChecked()) {
-					fTableViewer.setCheckedElements(new Object[] {event.getElement()});
-					handleActivate();
-				} else {
-					handleActivate();
-				}
-
+				handleActivate();
 			}
 		});
 		fTableViewer.addSelectionChangedListener(new ISelectionChangedListener() {
@@ -349,18 +343,18 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 
 		if (service != null) {
 			try {
-				fPrevious = service.getWorkspaceTargetHandle();
+				fPrevious.add(service.getWorkspaceTargetHandle());
 				Iterator<ITargetDefinition> iterator = fTargets.iterator();
 				while (iterator.hasNext()) {
 					ITargetDefinition target = iterator.next();
 					if (target.getHandle().equals(fPrevious)) {
-						fActiveTarget = target;
-						fTableViewer.setCheckedElements(new Object[] {fActiveTarget});
+						fActiveTargets.add(target);
+						fTableViewer.setCheckedElements(fActiveTargets.toArray());
 						fTableViewer.refresh(target);
 						break;
 					}
 				}
-				if (fPrevious != null && !fPrevious.exists()) {
+				if (!fPrevious.isEmpty()) {
 					setMessage(PDEUIMessages.TargetPlatformPreferencePage2_23, IStatus.WARNING);
 					fWarningComp = SWTFactory.createComposite(comp, 2, 1, GridData.FILL_HORIZONTAL, 0, 0);
 					Label warningImage = SWTFactory.createLabel(fWarningComp, "", 1); //$NON-NLS-1$
@@ -375,7 +369,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 				PDEPlugin.log(e);
 				setErrorMessage(PDEUIMessages.TargetPlatformPreferencePage2_23);
 			}
-			if (getMessage() == null && fActiveTarget == null) {
+			if (getMessage() == null && !fActiveTargets.isEmpty()) {
 				setMessage(PDEUIMessages.TargetPlatformPreferencePage2_22, IMessageProvider.INFORMATION);
 			}
 		}
@@ -386,8 +380,11 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 	 */
 	private void handleActivate() {
 		Object[] checked = fTableViewer.getCheckedElements();
+		fActiveTargets.clear();
 		if (checked.length > 0) {
-			fActiveTarget = (ITargetDefinition) checked[0];
+			for (Object item : checked) {
+				fActiveTargets.add((ITargetDefinition) item);
+			}
 			setMessage(null);
 			if (fWarningComp != null) {
 				Composite parent = fWarningComp.getParent();
@@ -396,10 +393,9 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 				parent.layout();
 			}
 			fTableViewer.refresh(true);
-			fTableViewer.setSelection(new StructuredSelection(fActiveTarget));
+			fTableViewer.setSelection(new StructuredSelection(fActiveTargets));
 		} else {
 			setMessage(PDEUIMessages.TargetPlatformPreferencePage2_22, IMessageProvider.INFORMATION);
-			fActiveTarget = null;
 			fTableViewer.refresh(true);
 		}
 	}
@@ -407,6 +403,8 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 	private void handleReload() {
 		IStructuredSelection selection = (IStructuredSelection) fTableViewer.getSelection();
 		if (!selection.isEmpty()) {
+			// selectedTarget != checkedTarget !
+			final ITargetDefinition selectedTarget = (ITargetDefinition) selection.getFirstElement();
 			isOutOfSynch = false;
 			ProgressMonitorDialog dialog = new ProgressMonitorDialog(getShell()) {
 				protected void configureShell(Shell shell) {
@@ -421,7 +419,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 							throw new InterruptedException();
 						}
 						// Resolve the target
-						fActiveTarget.resolve(monitor);
+						selectedTarget.resolve(monitor);
 						if (monitor.isCanceled()) {
 							throw new InterruptedException();
 						}
@@ -434,17 +432,18 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 				// Do nothing, resolve will happen when user presses ok
 			}
 
-			if (fActiveTarget.isResolved()) {
+			if (selectedTarget.isResolved()) {
 				// Check if the bundle resolution has errors
-				IStatus bundleStatus = fActiveTarget.getStatus();
+				IStatus bundleStatus = selectedTarget.getStatus();
 				if (bundleStatus.getSeverity() == IStatus.ERROR) {
 					ErrorDialog.openError(getShell(), PDEUIMessages.TargetPlatformPreferencePage2_14, PDEUIMessages.TargetPlatformPreferencePage2_15, bundleStatus, IStatus.ERROR);
 				}
 
 				// Compare the target to the existing platform
 				try {
-					if (bundleStatus.getSeverity() != IStatus.ERROR && fActiveTarget.getHandle().equals(fPrevious) && ((TargetDefinition) fPrevious.getTargetDefinition()).isContentEquivalent(fActiveTarget)) {
-						IStatus compare = getTargetService().compareWithTargetPlatform(fActiveTarget);
+					// TODO: strange condition with previous
+					if (bundleStatus.getSeverity() != IStatus.ERROR && selectedTarget.getHandle().equals(fPrevious) /*&& ((TargetDefinition) fPrevious.getTargetDefinition()).isContentEquivalent(fActiveTarget)*/) {
+						IStatus compare = getTargetService().compareWithTargetPlatform(selectedTarget);
 						if (!compare.isOK()) {
 							MessageDialog.openInformation(getShell(), PDEUIMessages.TargetPlatformPreferencePage2_17, PDEUIMessages.TargetPlatformPreferencePage2_18);
 							isOutOfSynch = true;
@@ -470,7 +469,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 			ITargetDefinition def = wizard.getTargetDefinition();
 			fTargets.add(def);
 			if (fTargets.size() == 1) {
-				fActiveTarget = def;
+				fActiveTargets.add(def);
 			}
 			fTableViewer.refresh(true);
 			fTableViewer.setSelection(new StructuredSelection(def));
@@ -498,14 +497,15 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 					fMoved.put(newTarget, moveLocation);
 				}
 
-				if (original == fActiveTarget) {
-					fActiveTarget = newTarget;
+				if (fActiveTargets.contains(original)) {
+					fActiveTargets.remove(original);
+					fActiveTargets.add(newTarget);
 				}
 
 				fTableViewer.refresh(true);
 
-				if (fActiveTarget == newTarget) {
-					fTableViewer.setCheckedElements(new Object[] {newTarget});
+				if (fActiveTargets.contains(newTarget)) {
+					fTableViewer.setCheckedElements(fActiveTargets.toArray());
 				}
 
 				fTableViewer.setSelection(new StructuredSelection(newTarget));
@@ -543,8 +543,8 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 				}
 			}
 
-			if (fActiveTarget != null && selected.contains(fActiveTarget)) {
-				fActiveTarget = null;
+			if (fActiveTargets.contains(selected)) {
+				fActiveTargets.remove(selected);
 				setMessage(PDEUIMessages.TargetPlatformPreferencePage2_22, IMessageProvider.INFORMATION);
 			}
 			fRemoved.addAll(selected);
@@ -585,7 +585,9 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 		//fDuplicateButton.setEnabled(size == 1);
 		if (selection.getFirstElement() != null) {
 			fMoveButton.setEnabled(size == 1 && ((ITargetDefinition) selection.getFirstElement()).getHandle() instanceof LocalTargetHandle);
-			fReloadButton.setEnabled(((ITargetDefinition) selection.getFirstElement()) == fActiveTarget && fActiveTarget.getHandle().equals(fPrevious));
+			// TODO
+			fReloadButton.setEnabled(size == 1);
+			//fReloadButton.setEnabled(((ITargetDefinition) selection.getFirstElement()) == fActiveTarget && fActiveTarget.getHandle().equals(fPrevious));
 		} else {
 			fMoveButton.setEnabled(false);
 			fReloadButton.setEnabled(false);
@@ -593,7 +595,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 	}
 
 	/**
-	 * Updates the details text box with information about the currently selected target 
+	 * Updates the details text box with information about the currently selected target
 	 */
 	protected void updateDetails() {
 		IStructuredSelection selection = (IStructuredSelection) fTableViewer.getSelection();
@@ -607,7 +609,7 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 	/**
 	 * Returns the target platform service or <code>null</code> if the service could
 	 * not be acquired.
-	 * 
+	 *
 	 * @return target platform service or <code>null</code>
 	 */
 	private ITargetPlatformService getTargetService() {
@@ -648,8 +650,9 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 				fTargets.add(deflt);
 				fTableViewer.refresh(false);
 			}
-			fActiveTarget = deflt;
-			fTableViewer.setCheckedElements(new Object[] {fActiveTarget});
+			fActiveTargets.clear();
+			fActiveTargets.add(deflt);
+			fTableViewer.setCheckedElements(fActiveTargets.toArray());
 			fTableViewer.refresh(true);
 			handleActivate();
 		}
@@ -666,33 +669,35 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 		}
 
 		// determine if default target has changed
-		ITargetDefinition toLoad = null;
+		List<ITargetDefinition> toLoad = new ArrayList<ITargetDefinition>();
 		boolean load = false;
 		try {
-			ITargetHandle activeHandle = null;
-			if (fActiveTarget != null) {
-				activeHandle = fActiveTarget.getHandle();
+			List<ITargetHandle> activeHandles = new ArrayList<ITargetHandle>();
+			for (ITargetDefinition checkedTargets : fActiveTargets) {
+				activeHandles.add(checkedTargets.getHandle());
 			}
-			if (fPrevious == null) {
-				if (activeHandle != null) {
-					toLoad = fActiveTarget;
+			if (fPrevious.isEmpty()) {
+				if (!activeHandles.isEmpty()) {
+					toLoad.addAll(fActiveTargets);
 					load = true;
 				}
+			} else if (activeHandles.isEmpty()) {
+				// load empty
+				load = true;
+			} else if (isOutOfSynch) {
+				toLoad = fActiveTargets;
+				load = true;
+			} else if (fPrevious.size() == activeHandles.size() && !fPrevious.containsAll(activeHandles)) {
+				toLoad = fActiveTargets;
+				load = true;
 			} else {
-				if (activeHandle == null) {
-					// load empty
-					load = true;
-				} else if (!fPrevious.equals(activeHandle) || isOutOfSynch) {
-					toLoad = fActiveTarget;
-					load = true;
-				} else {
-					ITargetDefinition original = fPrevious.getTargetDefinition();
-					// TODO: should just check for structural changes
-					if (((TargetDefinition) original).isContentEquivalent(fActiveTarget)) {
-						load = false;
-					} else {
-						load = true;
-						toLoad = fActiveTarget;
+				for (ITargetHandle original : fPrevious) {
+					for (ITargetDefinition active : fActiveTargets) {
+						// TODO: should just check for structural changes
+						if (!((TargetDefinition) original.getTargetDefinition()).isContentEquivalent(active)) {
+							load = true;
+							toLoad = fActiveTargets;
+						}
 					}
 				}
 			}
@@ -719,9 +724,9 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 					ITargetDefinition workspaceTarget = wrkspcTargetHandle.getTargetDefinition();
 					fTargets.add(workspaceTarget);
 					fTableViewer.refresh(false);
-					if (target == fActiveTarget) {
+					if (fActiveTargets.contains(target)) {
 						load = true;
-						toLoad = workspaceTarget;
+						toLoad.add(workspaceTarget);
 					}
 				} catch (CoreException e) {
 					PDEPlugin.log(e);
@@ -774,16 +779,17 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 			IJobChangeListener listener = new JobChangeAdapter() {
 				public void done(IJobChangeEvent event) {
 					if (event.getResult().getSeverity() == IStatus.OK) {
-						if (fActiveTarget != null) {
-							PDEPreferencesManager pref = new PDEPreferencesManager(PDEPlugin.getPluginId());
-							if (pref.getBoolean(IPreferenceConstants.ADD_TO_JAVA_SEARCH)) {
-								AddToJavaSearchJob.synchWithTarget(fActiveTarget);
-							}
+						PDEPreferencesManager pref = new PDEPreferencesManager(PDEPlugin.getPluginId());
+						if (pref.getBoolean(IPreferenceConstants.ADD_TO_JAVA_SEARCH)) {
+							AddToJavaSearchJob.synchWithTargets(fActiveTargets);
+						}
+						List<Version> newerOSGiVersions = new ArrayList<Version>();
+						for (ITargetDefinition activeTarget : fActiveTargets) {
 							// Ignore the qualifier when comparing (otherwise N builds always newer than I builds)
 							Version platformOsgiVersion = Platform.getBundle(ORG_ECLIPSE_OSGI).getVersion();
 							platformOsgiVersion = new Version(platformOsgiVersion.getMajor(), platformOsgiVersion.getMinor(), platformOsgiVersion.getMicro());
 							TargetBundle[] bundles;
-							bundles = fActiveTarget.getAllBundles();
+							bundles = activeTarget.getAllBundles();
 							if (bundles != null) {
 								for (int index = 0; index < bundles.length; index++) {
 									BundleInfo bundleInfo = bundles[index].getBundleInfo();
@@ -792,30 +798,37 @@ public class TargetPlatformPreferencePage extends PreferencePage implements IWor
 										Version bundleVersion = Version.parseVersion(bundleInfo.getVersion());
 										bundleVersion = new Version(bundleVersion.getMajor(), bundleVersion.getMinor(), bundleVersion.getMicro());
 										if (platformOsgiVersion.compareTo(bundleVersion) < 0) {
-											Display.getDefault().syncExec(new Runnable() {
-												public void run() {
-													MessageDialog.openWarning(PDEPlugin.getActiveWorkbenchShell(), PDEUIMessages.TargetPlatformPreferencePage2_28, PDEUIMessages.TargetPlatformPreferencePage2_10);
-												}
-											});
+											newerOSGiVersions.add(bundleVersion);
 										}
 										break;
 									}
 								}
 							}
 						}
+						if (!newerOSGiVersions.isEmpty()) {
+							Display.getDefault().syncExec(new Runnable() {
+								public void run() {
+									// TODO refine message to show actual versions
+									MessageDialog.openWarning(PDEPlugin.getActiveWorkbenchShell(), PDEUIMessages.TargetPlatformPreferencePage2_28, PDEUIMessages.TargetPlatformPreferencePage2_10);
+								}
+							});
+						}
 					}
 				}
 			};
 
 			LoadTargetDefinitionJob.load(toLoad, listener);
-			fPrevious = toLoad == null ? null : toLoad.getHandle();
+			fPrevious.clear();
+			for (ITargetDefinition target : toLoad) {
+				fPrevious.add(target.getHandle());
+			}
 		}
 
 		fMoved.clear();
 		boolean gc = !fRemoved.isEmpty();
 		fRemoved.clear();
 		if (toLoad != null) {
-			fActiveTarget = toLoad;
+			fActiveTargets = toLoad;
 		}
 		fTableViewer.refresh(true);
 		updateButtons();
